@@ -1,16 +1,13 @@
 const express = require('express');
 const cors = require('cors');
-const nodemailer = require('nodemailer');
 const { PDFDocument, rgb } = require('pdf-lib');
 const fontkit = require('@pdf-lib/fontkit');
 
 const {
   SUPABASE_URL,
   SUPABASE_KEY,
-  SMTP_HOST = 'smtp.gmail.com',
-  SMTP_PORT = '465',
-  SMTP_USER,
-  SMTP_PASS,
+  RESEND_API_KEY,
+  RESEND_FROM = 'Smart PDF Forms <onboarding@resend.dev>',
   NOTIFY_EMAIL,
   ALLOWED_ORIGIN = '*',
   PORT = 3000,
@@ -20,21 +17,18 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   console.error('Missing SUPABASE_URL / SUPABASE_KEY');
   process.exit(1);
 }
-if (!SMTP_USER || !SMTP_PASS) {
-  console.error('Missing SMTP_USER / SMTP_PASS');
+if (!RESEND_API_KEY) {
+  console.error('Missing RESEND_API_KEY');
+  process.exit(1);
+}
+if (!NOTIFY_EMAIL) {
+  console.error('Missing NOTIFY_EMAIL');
   process.exit(1);
 }
 
 const app = express();
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 app.use(express.json({ limit: '25mb' }));
-
-const transporter = nodemailer.createTransport({
-  host: SMTP_HOST,
-  port: Number(SMTP_PORT),
-  secure: Number(SMTP_PORT) === 465,
-  auth: { user: SMTP_USER, pass: SMTP_PASS },
-});
 
 const HEBREW_FONT_URL =
   'https://cdn.jsdelivr.net/gh/google/fonts@main/ofl/heebo/Heebo%5Bwght%5D.ttf';
@@ -259,13 +253,10 @@ async function saveSubmission(formId, answers, signature, clientName, pdfBytes) 
 }
 
 async function sendMail({ formName, clientName, answersText, pdfBytes, toEmail }) {
-  const recipient = toEmail || NOTIFY_EMAIL || SMTP_USER;
-  const safeName = (clientName || 'submission').replace(/[^a-zA-Z0-9._֐-׿ -]/g, '');
-  await transporter.sendMail({
-    from: `"Smart PDF Forms" <${SMTP_USER}>`,
-    to: recipient,
-    subject: `טופס חדש: ${formName} — ${clientName || ''}`.trim(),
-    text:
+  const recipient = toEmail || NOTIFY_EMAIL;
+  const safeName = (clientName || 'submission').replace(/[^a-zA-Z0-9._-]/g, '');
+  const subject = `טופס חדש: ${formName} — ${clientName || ''}`.trim();
+  const text =
 `התקבל טופס חדש.
 
 טופס: ${formName}
@@ -275,15 +266,32 @@ async function sendMail({ formName, clientName, answersText, pdfBytes, toEmail }
 תשובות:
 ${answersText}
 
-ה-PDF המלא מצורף.`,
-    attachments: [
-      {
-        filename: `${safeName || 'form'}.pdf`,
-        content: Buffer.from(pdfBytes),
-        contentType: 'application/pdf',
-      },
-    ],
+ה-PDF המלא מצורף.`;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      from: RESEND_FROM,
+      to: [recipient],
+      subject,
+      text,
+      attachments: [
+        {
+          filename: `${safeName || 'form'}.pdf`,
+          content: Buffer.from(pdfBytes).toString('base64'),
+        },
+      ],
+    }),
   });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error('Resend error: ' + res.status + ' ' + errText);
+  }
 }
 
 app.get('/health', (req, res) => res.json({ ok: true }));
