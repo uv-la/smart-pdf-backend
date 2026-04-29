@@ -41,16 +41,8 @@ async function loadHebrewFont() {
   return cachedFontBytes;
 }
 
-const HEBREW_RE = /[֐-׿]/;
 function shapeRtl(s) {
-  if (s == null) return '';
-  const str = String(s);
-  if (!HEBREW_RE.test(str)) return str;
-  const tokens = str.match(/[֐-׿]+|[^֐-׿]+/g) || [];
-  return tokens
-    .map(t => (HEBREW_RE.test(t) ? [...t].reverse().join('') : t))
-    .reverse()
-    .join('');
+  return s == null ? '' : String(s);
 }
 
 async function fetchForm(formId) {
